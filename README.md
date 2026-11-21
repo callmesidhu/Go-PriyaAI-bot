@@ -22,6 +22,12 @@ Instagram manually. Set `PRIYA_CDP_ENDPOINT`, `PRIYA_API_URL`, and `PRIYA_ADMIN_
 debugging endpoint; in that case use a dedicated persistent profile and log in manually. The worker pauses
 rather than attempting to resolve security challenges.
 
+## Operations
+
+On Debian, run `bash scripts/install.sh`, copy `.env.example` to `.env`, set a long unique
+`PRIYA_ADMIN_TOKEN`, then run `bash scripts/start.sh`. Use `bash scripts/backup.sh` for a consistent
+SQLite backup. Run `go test ./...` before deploying changes.
+
 ## Safety boundary
 
 This project never stores passwords, cookies, or authentication tokens. It does not bypass challenges,
