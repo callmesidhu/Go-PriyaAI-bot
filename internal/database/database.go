@@ -221,6 +221,19 @@ func (s *Store) UserMemories(ctx context.Context, userID int64) ([]Memory, error
 	}
 	return out, rows.Err()
 }
+func (s *Store) AddMemory(ctx context.Context, userID int64, category, value string) (Memory, error) {
+	n := now()
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO user_memories(user_id,category,value,created_at) VALUES(?,?,?,?) ON CONFLICT(user_id,category,value) DO NOTHING`, userID, category, value, n)
+	if err != nil {
+		return Memory{}, err
+	}
+	var id int64
+	err = s.DB.QueryRowContext(ctx, `SELECT id,created_at FROM user_memories WHERE user_id=? AND category=? AND value=?`, userID, category, value).Scan(&id, &n)
+	if err != nil {
+		return Memory{}, err
+	}
+	return Memory{ID: id, Category: category, Value: value, CreatedAt: n}, nil
+}
 func (s *Store) DeleteMemory(ctx context.Context, userID, memoryID int64) error {
 	result, err := s.DB.ExecContext(ctx, "DELETE FROM user_memories WHERE id=? AND user_id=?", memoryID, userID)
 	if err != nil {

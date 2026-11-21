@@ -28,6 +28,13 @@ On Debian, run `bash scripts/install.sh`, copy `.env.example` to `.env`, set a l
 `PRIYA_ADMIN_TOKEN`, then run `bash scripts/start.sh`. Use `bash scripts/backup.sh` for a consistent
 SQLite backup. Run `go test ./...` before deploying changes.
 
+## Admin API
+
+Use the bearer token from `.env`. `GET /api/status` reports automation, browser, and login state.
+`GET /api/conversations` and `GET /api/conversations/:id/messages` expose local records. Explicit memories
+can be managed with `GET`, `POST`, and `DELETE /api/users/:id/memories`; no profile facts are silently
+invented or imported from outside the conversation.
+
 ## Safety boundary
 
 This project never stores passwords, cookies, or authentication tokens. It does not bypass challenges,

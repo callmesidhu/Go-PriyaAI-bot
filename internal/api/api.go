@@ -84,6 +84,8 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request) {
 		s.conversation(w, r)
 	case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/users/") && strings.HasSuffix(r.URL.Path, "/memories"):
 		s.memories(w, r)
+	case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/api/users/") && strings.HasSuffix(r.URL.Path, "/memories"):
+		s.addMemory(w, r)
 	case r.Method == "DELETE" && strings.HasPrefix(r.URL.Path, "/api/users/") && strings.Contains(r.URL.Path, "/memories/"):
 		s.deleteMemory(w, r)
 	default:
@@ -127,6 +129,33 @@ func (s *Server) memories(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	write(w, items)
+}
+func (s *Server) addMemory(w http.ResponseWriter, r *http.Request) {
+	userID, ok := pathID(r, 2)
+	if !ok {
+		http.Error(w, "invalid user id", 400)
+		return
+	}
+	var in struct {
+		Category string `json:"category"`
+		Value    string `json:"value"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 2048)).Decode(&in) != nil || strings.TrimSpace(in.Category) == "" || strings.TrimSpace(in.Value) == "" {
+		http.Error(w, "category and value are required", 400)
+		return
+	}
+	if len([]rune(in.Category)) > 64 || len([]rune(in.Value)) > 500 {
+		http.Error(w, "memory is too long", 400)
+		return
+	}
+	memory, err := s.store.AddMemory(r.Context(), userID, strings.TrimSpace(in.Category), strings.TrimSpace(in.Value))
+	if err != nil {
+		http.Error(w, "database error", 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(memory)
 }
 func (s *Server) deleteMemory(w http.ResponseWriter, r *http.Request) {
 	userID, ok := pathID(r, 2)
