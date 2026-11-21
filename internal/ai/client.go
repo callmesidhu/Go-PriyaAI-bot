@@ -36,9 +36,19 @@ type chatResponse struct {
 }
 
 func (c *Client) Healthy(ctx context.Context) error {
-	r, err := c.HTTP.Do((&http.Request{}).WithContext(ctx))
-	_ = r
-	return err
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(c.URL, "/")+"/api/tags", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("ollama health check: %s", resp.Status)
+	}
+	return nil
 }
 func (c *Client) Generate(ctx context.Context, input string) (string, error) {
 	payload, _ := json.Marshal(chatRequest{Model: c.Model, Messages: []message{{"system", c.Prompt}, {"user", input}}, Options: options{2048, .8, 100}})

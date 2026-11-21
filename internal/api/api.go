@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/callmesidhu/Go-PriyaAI-bot/internal/ai"
+	"github.com/callmesidhu/Go-PriyaAI-bot/internal/browser"
 	"github.com/callmesidhu/Go-PriyaAI-bot/internal/database"
 	"net/http"
 	"strings"
@@ -11,13 +12,14 @@ import (
 )
 
 type Server struct {
-	store *database.Store
-	ai    *ai.Client
-	token string
+	store   *database.Store
+	ai      *ai.Client
+	browser *browser.Manager
+	token   string
 }
 
-func New(store *database.Store, aiClient *ai.Client, token string) *Server {
-	return &Server{store, aiClient, token}
+func New(store *database.Store, aiClient *ai.Client, manager *browser.Manager, token string) *Server {
+	return &Server{store: store, ai: aiClient, browser: manager, token: token}
 }
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -53,7 +55,10 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "database unavailable", 500)
 			return
 		}
-		write(w, map[string]string{"automation": status})
+		connected, loggedIn, reason := s.browser.Status()
+		write(w, map[string]any{"automation": status, "browser_connected": connected, "instagram_logged_in": loggedIn, "browser_reason": reason})
+	case r.Method == "POST" && r.URL.Path == "/api/browser/state":
+		s.browserState(w, r)
 	case r.Method == "POST" && r.URL.Path == "/api/automation/pause":
 		s.setStatus(w, r, "paused")
 	case r.Method == "POST" && r.URL.Path == "/api/automation/resume":
@@ -69,6 +74,26 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+func (s *Server) browserState(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Kind   string `json:"kind"`
+		Reason string `json:"reason"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in) != nil {
+		http.Error(w, "invalid state", 400)
+		return
+	}
+	switch in.Kind {
+	case "ready":
+		s.browser.Report(true, true, "")
+	case "paused":
+		s.browser.Report(true, false, in.Reason)
+	default:
+		http.Error(w, "invalid state", 400)
+		return
+	}
+	write(w, map[string]string{"status": "recorded"})
 }
 func (s *Server) setStatus(w http.ResponseWriter, r *http.Request, status string) {
 	if err := s.store.SetStatus(r.Context(), status); err != nil {

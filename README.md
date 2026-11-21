@@ -14,6 +14,14 @@ browser worker. It does not use Meta APIs, extract browser cookies, or request I
 Administrative endpoints require `Authorization: Bearer $PRIYA_ADMIN_TOKEN`. The service deliberately
 starts with browser automation paused: a browser worker must be configured and a human must complete any login.
 
+## Browser worker
+
+Install Node.js plus `playwright`, start your browser yourself with remote debugging enabled, and log into
+Instagram manually. Set `PRIYA_CDP_ENDPOINT`, `PRIYA_API_URL`, and `PRIYA_ADMIN_TOKEN`, then run
+`node scripts/browser-worker.mjs`. Existing browser sessions cannot reliably be attached without a
+debugging endpoint; in that case use a dedicated persistent profile and log in manually. The worker pauses
+rather than attempting to resolve security challenges.
+
 ## Safety boundary
 
 This project never stores passwords, cookies, or authentication tokens. It does not bypass challenges,
