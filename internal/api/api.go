@@ -2,12 +2,14 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"github.com/callmesidhu/Go-PriyaAI-bot/internal/ai"
 	"github.com/callmesidhu/Go-PriyaAI-bot/internal/browser"
 	"github.com/callmesidhu/Go-PriyaAI-bot/internal/conversation"
 	"github.com/callmesidhu/Go-PriyaAI-bot/internal/database"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -78,11 +80,73 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		write(w, items)
-	case strings.HasPrefix(r.URL.Path, "/api/conversations/") || strings.HasPrefix(r.URL.Path, "/api/users/"):
-		http.Error(w, "not found", 404)
+	case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/conversations/"):
+		s.conversation(w, r)
+	case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/users/") && strings.HasSuffix(r.URL.Path, "/memories"):
+		s.memories(w, r)
+	case r.Method == "DELETE" && strings.HasPrefix(r.URL.Path, "/api/users/") && strings.Contains(r.URL.Path, "/memories/"):
+		s.deleteMemory(w, r)
 	default:
 		http.NotFound(w, r)
 	}
+}
+func pathID(r *http.Request, index int) (int64, bool) {
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) <= index {
+		return 0, false
+	}
+	id, err := strconv.ParseInt(parts[index], 10, 64)
+	return id, err == nil && id > 0
+}
+func (s *Server) conversation(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r, 2)
+	if !ok {
+		http.Error(w, "invalid conversation id", 400)
+		return
+	}
+	if strings.HasSuffix(r.URL.Path, "/messages") || strings.Count(strings.Trim(r.URL.Path, "/"), "/") == 2 {
+		items, err := s.store.Messages(r.Context(), id)
+		if err != nil {
+			http.Error(w, "database error", 500)
+			return
+		}
+		write(w, items)
+		return
+	}
+	http.NotFound(w, r)
+}
+func (s *Server) memories(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(r, 2)
+	if !ok {
+		http.Error(w, "invalid user id", 400)
+		return
+	}
+	items, err := s.store.UserMemories(r.Context(), id)
+	if err != nil {
+		http.Error(w, "database error", 500)
+		return
+	}
+	write(w, items)
+}
+func (s *Server) deleteMemory(w http.ResponseWriter, r *http.Request) {
+	userID, ok := pathID(r, 2)
+	if !ok {
+		http.Error(w, "invalid user id", 400)
+		return
+	}
+	memoryID, ok := pathID(r, 4)
+	if !ok {
+		http.Error(w, "invalid memory id", 400)
+		return
+	}
+	if err := s.store.DeleteMemory(r.Context(), userID, memoryID); err == sql.ErrNoRows {
+		http.NotFound(w, r)
+		return
+	} else if err != nil {
+		http.Error(w, "database error", 500)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 func (s *Server) incoming(w http.ResponseWriter, r *http.Request) {
 	var in browser.IncomingMessage
