@@ -11,6 +11,19 @@ import (
 )
 
 type Store struct{ DB *sql.DB }
+type Conversation struct {
+	ID        int64  `json:"id"`
+	Username  string `json:"username"`
+	Summary   string `json:"summary"`
+	UpdatedAt string `json:"updated_at"`
+}
+type Message struct {
+	ID        int64  `json:"id"`
+	Direction string `json:"direction"`
+	Content   string `json:"content"`
+	Status    string `json:"status"`
+	CreatedAt string `json:"created_at"`
+}
 
 func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
@@ -70,4 +83,74 @@ func (s *Store) Status(ctx context.Context) (string, error) {
 func (s *Store) SetStatus(ctx context.Context, status string) error {
 	_, err := s.DB.ExecContext(ctx, "INSERT INTO bot_settings(key,value) VALUES('automation_state',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", status)
 	return err
+}
+func (s *Store) RecordExchange(ctx context.Context, externalID, senderID, username, incoming, reply string) (bool, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var found string
+	err = tx.QueryRowContext(ctx, "SELECT external_id FROM processed_messages WHERE external_id=?", externalID).Scan(&found)
+	if err == nil {
+		return false, nil
+	}
+	if err != sql.ErrNoRows {
+		return false, err
+	}
+	n := now()
+	if _, err = tx.ExecContext(ctx, `INSERT INTO users(instagram_id,username,created_at) VALUES(?,?,?) ON CONFLICT(instagram_id) DO UPDATE SET username=excluded.username`, senderID, username, n); err != nil {
+		return false, err
+	}
+	var userID, conversationID int64
+	if err = tx.QueryRowContext(ctx, "SELECT id FROM users WHERE instagram_id=?", senderID).Scan(&userID); err != nil {
+		return false, err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO conversations(user_id,updated_at) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET updated_at=excluded.updated_at`, userID, n); err != nil {
+		return false, err
+	}
+	if err = tx.QueryRowContext(ctx, "SELECT id FROM conversations WHERE user_id=?", userID).Scan(&conversationID); err != nil {
+		return false, err
+	}
+	for _, m := range []struct{ dir, content, status string }{{"in", incoming, "received"}, {"out", reply, "sent"}} {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO messages(conversation_id,external_id,direction,content,status,created_at) VALUES(?,?,?,?,?,?)", conversationID, sql.NullString{String: externalID, Valid: m.dir == "in"}, m.dir, m.content, m.status, n); err != nil {
+			return false, err
+		}
+	}
+	if _, err = tx.ExecContext(ctx, "INSERT INTO processed_messages(external_id,processed_at) VALUES(?,?)", externalID, n); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
+}
+func (s *Store) Conversations(ctx context.Context) ([]Conversation, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT c.id,u.username,c.summary,c.updated_at FROM conversations c JOIN users u ON u.id=c.user_id ORDER BY c.updated_at DESC LIMIT 100`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Conversation
+	for rows.Next() {
+		var x Conversation
+		if err := rows.Scan(&x.ID, &x.Username, &x.Summary, &x.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, x)
+	}
+	return out, rows.Err()
+}
+func (s *Store) Messages(ctx context.Context, id int64) ([]Message, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,direction,content,status,created_at FROM messages WHERE conversation_id=? ORDER BY id`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Message
+	for rows.Next() {
+		var x Message
+		if err := rows.Scan(&x.ID, &x.Direction, &x.Content, &x.Status, &x.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, x)
+	}
+	return out, rows.Err()
 }

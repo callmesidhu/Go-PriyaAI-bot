@@ -33,7 +33,12 @@ async function run() {
         await row.click(); await page.waitForTimeout(500);
         const text = await page.locator('[role="main"] [dir="auto"]').last().innerText().catch(() => '');
         if (!text) continue;
-        await fetch(`${api}/api/browser/incoming`, { method:'POST', headers, body:JSON.stringify({ id:href+':'+text, sender_id:href, username:label.split('\n')[0], text }) });
+        const response = await fetch(`${api}/api/browser/incoming`, { method:'POST', headers, body:JSON.stringify({ id:href+':'+text, sender_id:href, username:label.split('\n')[0], text }) });
+        const { reply } = await response.json();
+        if (!response.ok || !reply) continue;
+        const box = page.locator('[contenteditable="true"][role="textbox"]').last();
+        await box.fill(reply);
+        await box.press('Enter');
       }
     } catch (err) { await state('paused', `Browser worker error: ${err.message}`); }
   }, poll);

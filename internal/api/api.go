@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"github.com/callmesidhu/Go-PriyaAI-bot/internal/ai"
 	"github.com/callmesidhu/Go-PriyaAI-bot/internal/browser"
+	"github.com/callmesidhu/Go-PriyaAI-bot/internal/conversation"
 	"github.com/callmesidhu/Go-PriyaAI-bot/internal/database"
 	"net/http"
 	"strings"
@@ -12,14 +13,15 @@ import (
 )
 
 type Server struct {
-	store   *database.Store
-	ai      *ai.Client
-	browser *browser.Manager
-	token   string
+	store     *database.Store
+	ai        *ai.Client
+	browser   *browser.Manager
+	processor *conversation.Processor
+	token     string
 }
 
-func New(store *database.Store, aiClient *ai.Client, manager *browser.Manager, token string) *Server {
-	return &Server{store: store, ai: aiClient, browser: manager, token: token}
+func New(store *database.Store, aiClient *ai.Client, manager *browser.Manager, processor *conversation.Processor, token string) *Server {
+	return &Server{store: store, ai: aiClient, browser: manager, processor: processor, token: token}
 }
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -59,6 +61,8 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request) {
 		write(w, map[string]any{"automation": status, "browser_connected": connected, "instagram_logged_in": loggedIn, "browser_reason": reason})
 	case r.Method == "POST" && r.URL.Path == "/api/browser/state":
 		s.browserState(w, r)
+	case r.Method == "POST" && r.URL.Path == "/api/browser/incoming":
+		s.incoming(w, r)
 	case r.Method == "POST" && r.URL.Path == "/api/automation/pause":
 		s.setStatus(w, r, "paused")
 	case r.Method == "POST" && r.URL.Path == "/api/automation/resume":
@@ -68,12 +72,32 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request) {
 	case r.Method == "POST" && r.URL.Path == "/api/chat/test":
 		s.testChat(w, r)
 	case r.Method == "GET" && r.URL.Path == "/api/conversations":
-		write(w, []any{})
+		items, err := s.store.Conversations(r.Context())
+		if err != nil {
+			http.Error(w, "database error", 500)
+			return
+		}
+		write(w, items)
 	case strings.HasPrefix(r.URL.Path, "/api/conversations/") || strings.HasPrefix(r.URL.Path, "/api/users/"):
 		http.Error(w, "not found", 404)
 	default:
 		http.NotFound(w, r)
 	}
+}
+func (s *Server) incoming(w http.ResponseWriter, r *http.Request) {
+	var in browser.IncomingMessage
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&in) != nil {
+		http.Error(w, "invalid message", 400)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 55*time.Second)
+	defer cancel()
+	reply, err := s.processor.Handle(ctx, in)
+	if err != nil {
+		http.Error(w, "message processing failed: "+err.Error(), 502)
+		return
+	}
+	write(w, map[string]string{"reply": reply})
 }
 func (s *Server) browserState(w http.ResponseWriter, r *http.Request) {
 	var in struct {
