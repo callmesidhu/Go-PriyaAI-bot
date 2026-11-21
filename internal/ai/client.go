@@ -34,6 +34,7 @@ type options struct {
 type chatResponse struct {
 	Message message `json:"message"`
 }
+type Turn struct{ Role, Content string }
 
 func (c *Client) Healthy(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(c.URL, "/")+"/api/tags", nil)
@@ -51,7 +52,14 @@ func (c *Client) Healthy(ctx context.Context) error {
 	return nil
 }
 func (c *Client) Generate(ctx context.Context, input string) (string, error) {
-	payload, _ := json.Marshal(chatRequest{Model: c.Model, Messages: []message{{"system", c.Prompt}, {"user", input}}, Options: options{2048, .8, 100}})
+	return c.GenerateTurns(ctx, []Turn{{Role: "user", Content: input}})
+}
+func (c *Client) GenerateTurns(ctx context.Context, turns []Turn) (string, error) {
+	messages := []message{{Role: "system", Content: c.Prompt}}
+	for _, turn := range turns {
+		messages = append(messages, message{Role: turn.Role, Content: turn.Content})
+	}
+	payload, _ := json.Marshal(chatRequest{Model: c.Model, Messages: messages, Options: options{2048, .8, 100}})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(c.URL, "/")+"/api/chat", bytes.NewReader(payload))
 	if err != nil {
 		return "", err

@@ -6,6 +6,7 @@ import (
 	"github.com/callmesidhu/Go-PriyaAI-bot/internal/ai"
 	"github.com/callmesidhu/Go-PriyaAI-bot/internal/browser"
 	"github.com/callmesidhu/Go-PriyaAI-bot/internal/database"
+	"strings"
 	"sync"
 )
 
@@ -31,7 +32,30 @@ func (p *Processor) Handle(ctx context.Context, in browser.IncomingMessage) (str
 	if done {
 		return "", nil
 	}
-	reply, err := p.ai.Generate(ctx, in.Text)
+	summary, memories, history, err := p.store.Context(ctx, in.SenderID)
+	if err != nil {
+		return "", err
+	}
+	turns := make([]ai.Turn, 0, len(history)+2)
+	if summary != "" {
+		turns = append(turns, ai.Turn{Role: "system", Content: "Conversation summary (use only when relevant; never invent details): " + summary})
+	}
+	if len(memories) > 0 {
+		parts := make([]string, 0, len(memories))
+		for _, m := range memories {
+			parts = append(parts, m.Category+": "+m.Value)
+		}
+		turns = append(turns, ai.Turn{Role: "system", Content: "Known user preferences, only if useful: " + strings.Join(parts, "; ")})
+	}
+	for _, m := range history {
+		role := "assistant"
+		if m.Direction == "in" {
+			role = "user"
+		}
+		turns = append(turns, ai.Turn{Role: role, Content: m.Content})
+	}
+	turns = append(turns, ai.Turn{Role: "user", Content: in.Text})
+	reply, err := p.ai.GenerateTurns(ctx, turns)
 	if err != nil {
 		return "", err
 	}

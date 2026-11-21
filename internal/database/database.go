@@ -24,6 +24,12 @@ type Message struct {
 	Status    string `json:"status"`
 	CreatedAt string `json:"created_at"`
 }
+type Memory struct {
+	ID        int64  `json:"id"`
+	Category  string `json:"category"`
+	Value     string `json:"value"`
+	CreatedAt string `json:"created_at"`
+}
 
 func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
@@ -153,4 +159,76 @@ func (s *Store) Messages(ctx context.Context, id int64) ([]Message, error) {
 		out = append(out, x)
 	}
 	return out, rows.Err()
+}
+func (s *Store) Context(ctx context.Context, senderID string) (string, []Memory, []Message, error) {
+	var conversationID int64
+	var summary string
+	err := s.DB.QueryRowContext(ctx, `SELECT c.id,c.summary FROM conversations c JOIN users u ON u.id=c.user_id WHERE u.instagram_id=?`, senderID).Scan(&conversationID, &summary)
+	if err == sql.ErrNoRows {
+		return "", nil, nil, nil
+	}
+	if err != nil {
+		return "", nil, nil, err
+	}
+	memories, err := s.MemoriesForConversation(ctx, conversationID)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,direction,content,status,created_at FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 10`, conversationID)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	defer rows.Close()
+	var messages []Message
+	for rows.Next() {
+		var m Message
+		if err := rows.Scan(&m.ID, &m.Direction, &m.Content, &m.Status, &m.CreatedAt); err != nil {
+			return "", nil, nil, err
+		}
+		messages = append([]Message{m}, messages...)
+	}
+	return summary, memories, messages, rows.Err()
+}
+func (s *Store) MemoriesForConversation(ctx context.Context, conversationID int64) ([]Memory, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT m.id,m.category,m.value,m.created_at FROM user_memories m JOIN conversations c ON c.user_id=m.user_id WHERE c.id=? ORDER BY m.id DESC LIMIT 20`, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Memory
+	for rows.Next() {
+		var x Memory
+		if err := rows.Scan(&x.ID, &x.Category, &x.Value, &x.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, x)
+	}
+	return out, rows.Err()
+}
+func (s *Store) UserMemories(ctx context.Context, userID int64) ([]Memory, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,category,value,created_at FROM user_memories WHERE user_id=? ORDER BY id DESC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Memory
+	for rows.Next() {
+		var x Memory
+		if err := rows.Scan(&x.ID, &x.Category, &x.Value, &x.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, x)
+	}
+	return out, rows.Err()
+}
+func (s *Store) DeleteMemory(ctx context.Context, userID, memoryID int64) error {
+	result, err := s.DB.ExecContext(ctx, "DELETE FROM user_memories WHERE id=? AND user_id=?", memoryID, userID)
+	if err != nil {
+		return err
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
